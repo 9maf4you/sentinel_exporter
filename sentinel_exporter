@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+import redis
+from prometheus_client import Gauge, start_http_server
+from time import sleep
+import argparse
+
+sentinel_status = Gauge('sentinel_status', "Status of sentinel. 0 means OK", ['name', 'address'])
+sentinel_slaves = Gauge('sentinel_slaves', "Count of connected slaves", ['name', 'address'])
+sentinel_sentinels = Gauge('sentinel_sentinels', "Count of working sentinels", ['name', 'address'])
+
+config = {
+    "HOST": "localhost",
+    "PORT": 5000,
+    "sleeptime": 1,
+    "cmd": "SENTINEL",
+    "webport": 8000
+}
+
+
+def conn_pool(HOST, PORT):
+    pool = redis.ConnectionPool(host=HOST, port=PORT)
+    r = redis.Redis(connection_pool=pool)
+    return r
+
+
+def set_metrics_masters(metrica):
+    labels = metrica[1]
+    name, address, status = labels.pop('name'), labels.pop('address'), labels.pop('status')
+    if status == 'ok':
+        status = 0
+    else:
+        status = 1
+
+    sentinel_status.labels(name, address).set(status)
+    sentinel_slaves.labels(name, address).set(labels.pop('slaves'))
+    sentinel_sentinels.labels(name, address).set(labels.pop('sentinels'))
+
+
+def parser_masters(response):
+    d1 = dict()
+    metrics_name = response.split(':')[0]
+    metrics_lab = ":".join(response.split(':')[1:])
+    for kv in metrics_lab.split(','):
+        k, v = kv.split("=")
+        d1[k] = v
+    return metrics_name, d1
+
+
+def route_metrics(sentinel_info):
+    for key, value in sentinel_info.iteritems():
+        if key.startswith('master'):
+            set_metrics_masters((key, value))
+        else:
+            pass #TODO
+
+
+def set_config():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-addr', type=str, default="localhost", help="hostname to connect")
+    parser.add_argument('-port', type=int, default=5000, help='port to connect, (default ":5000")')
+    parser.add_argument('-sleeptime', type=int, default=1,  help='sleep time beetween probes')
+    parser.add_argument('-weblisten', type=int, default=8000, help='Address to listen (default ":8000")')
+
+    args = parser.parse_args()
+
+    config['HOST'] = args.addr
+    config['PORT'] = args.port
+    config['sleeptime'] = args.sleeptime
+    config['webport'] = args.weblisten
+
+
+def main():
+    set_config()
+    start_http_server(config['webport'])
+    r = conn_pool(config['HOST'], config['PORT'])
+
+    while True:
+        info = r.info(config['cmd'])
+        route_metrics(info)
+        sleep(config['sleeptime'])
+
+
+if __name__ == "__main__":
+    main()
