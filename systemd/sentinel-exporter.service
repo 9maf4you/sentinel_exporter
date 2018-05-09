@@ -1,0 +1,32 @@
+[Unit]
+Description=Sentinel exporter for prometheus monitoring system
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/sentinel_exporter /etc/redis-sentinel.conf --daemonize no
+ExecStop=/usr/libexec/redis-shutdown redis-sentinel
+User=redis
+Group=redis
+
+[Install]
+WantedBy=multi-user.target
+
+###
+[Unit]
+Description=Prometheus Exporter for Sentinel Metrics.
+After=syslog.target network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/sysconfig/sentinel_exporter_opts
+ExecStart=/usr/bin/sentinel_exporter $OPTIONS
+Restart=always
+KillSignal=SIGINT
+User=nobody
+Group=nobody
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
